@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<div>
+    <p>
+        Git Directory Strategy Plugin - Ein Jenkins Plugin für Multibranch Pipelines, das Builds basierend auf Änderungen in bestimmten Verzeichnissen filtert.
+    </p>
+    <p>
+        Das Plugin erweitert die Konfiguration von Multibranch Pipelines um die Möglichkeit, mehrere Verzeichnisse anzugeben und über die GitHub API zu prüfen, ob es Änderungen in diesen Verzeichnissen gab.
+    </p>
+    
+    <h2>Funktionen</h2>
+    <ul>
+        <li>Anzeige von Projekt-Informationen</li>
+        <li>Übersicht über letzte Builds</li>
+        <li>Plugin-Status-Informationen</li>
+        <li>Benutzerfreundliche Oberfläche</li>
+    </ul>
+    
+    <h2>Verwendung</h2>
+    <p>
+        Nach der Installation des Plugins wird auf jeder Projektseite ein neuer Link
+        "Example Plugin Aktion" angezeigt. Klicken Sie darauf, um die Plugin-Funktionen zu nutzen.
+    </p>
+    
+    <h2>Version</h2>
+    <p>Version: 1.0.0</p>
+    
+    <h2>Autor</h2>
+    <p>Erstellt mit Jenkins Plugin Archetype</p>
+</div>

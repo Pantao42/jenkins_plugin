@@ -1,0 +1,41 @@
+<?jelly escape-by-default='true'?>
+<div>
+    <h2>Git Directory Strategy Plugin</h2>
+    <p>
+        <strong>Projekt:</strong> ${it.projectName}
+    </p>
+    <p>
+        <strong>URL:</strong> <a href="${it.projectUrl}">${it.projectUrl}</a>
+    </p>
+    <p>
+        <strong>Buildbar:</strong> ${it.buildable ? 'Ja' : 'Nein'}
+    </p>
+    
+    <h3>Letzter Build</h3>
+    <j:if test="${it.lastBuild != null}">
+        <p>
+            <strong>Build #${it.lastBuild.number}</strong><br/>
+            <strong>Status:</strong> ${it.lastBuild.result}<br/>
+            <strong>Zeitpunkt:</strong> ${it.lastBuild.time}
+        </p>
+    </j:if>
+    <j:if test="${it.lastBuild == null}">
+        <p>Noch keine Builds vorhanden.</p>
+    </j:if>
+    
+    <h3>Plugin-Informationen</h3>
+    <p>
+        Dieses Plugin erweitert Multibranch Pipelines um die Möglichkeit, Builds basierend auf Änderungen in bestimmten Verzeichnissen zu filtern.
+    </p>
+    <p>
+        <strong>Features:</strong>
+    </p>
+    <ul>
+        <li>Filtert Builds basierend auf Änderungen in bestimmten Verzeichnissen</li>
+        <li>Unterstützt reguläre Ausdrücke für Verzeichnisspezifikation</li>
+        <li>Integriert sich in Multibranch Pipeline Konfigurationen</li>
+        <li>Nutzt GitHub API für Änderungsprüfung</li>
+        <li>Credentials werden sicher in Jenkins gespeichert</li>
+    </ul>
+</div>
+
