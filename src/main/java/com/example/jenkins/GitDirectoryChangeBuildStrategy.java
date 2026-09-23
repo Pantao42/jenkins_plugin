@@ -8,6 +8,7 @@ import hudson.scm.SCM;
 import hudson.util.FormValidation;
 import jenkins.branch.BranchBuildStrategy;
 import jenkins.branch.BranchBuildStrategyDescriptor;
+import jenkins.plugins.git.AbstractGitSCMSource;
 import jenkins.model.Jenkins;
 import jenkins.scm.api.SCMHead;
 import jenkins.scm.api.SCMRevision;
@@ -15,6 +16,7 @@ import jenkins.scm.api.SCMSource;
 import jenkins.scm.api.SCMSourceOwner;
 import org.jenkinsci.plugins.github_branch_source.GitHubSCMSource;
 import org.jenkinsci.plugins.plaincredentials.StringCredentials;
+import org.kohsuke.github.GHCompare;
 import org.kohsuke.github.GHCommit;
 import org.kohsuke.github.GHRepository;
 import org.kohsuke.github.GitHub;
@@ -29,10 +31,12 @@ import com.cloudbees.plugins.credentials.common.StandardListBoxModel;
 import com.cloudbees.plugins.credentials.domains.URIRequirementBuilder;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 /**
  * Build-Strategie für Multibranch Pipelines, die Builds basierend auf Änderungen in bestimmten Verzeichnissen filtert.
@@ -48,10 +52,13 @@ public class GitDirectoryChangeBuildStrategy extends BranchBuildStrategy {
     private final boolean buildOnBranchChange;
     private final boolean buildOnPullRequestChange;
 
+    private transient volatile List<Pattern> compiledPatterns;
+
     @DataBoundConstructor
     public GitDirectoryChangeBuildStrategy(List<String> directoryRegexes, String credentialsId, String githubApiUrl,
                                          boolean buildOnBranchChange, boolean buildOnPullRequestChange) {
-        this.directoryRegexes = directoryRegexes;
+        this.directoryRegexes = directoryRegexes == null ? new ArrayList<>() : new ArrayList<>(directoryRegexes);
+        this.directoryRegexes.removeIf(r -> r == null || r.trim().isEmpty());
         this.credentialsId = credentialsId;
         this.githubApiUrl = githubApiUrl != null ? githubApiUrl : "https://api.github.com";
         this.buildOnBranchChange = buildOnBranchChange;
@@ -78,8 +85,8 @@ public class GitDirectoryChangeBuildStrategy extends BranchBuildStrategy {
         return buildOnPullRequestChange;
     }
 
-            @Override
-        public boolean isAutomaticBuild(SCMSource source, SCMHead head, SCMRevision currRevision, SCMRevision prevRevision, SCMRevision lastSeenRevision, TaskListener listener) {
+    @Override
+    public boolean isAutomaticBuild(SCMSource source, SCMHead head, SCMRevision currRevision, SCMRevision prevRevision, SCMRevision lastSeenRevision, TaskListener listener) {
         if (directoryRegexes == null || directoryRegexes.isEmpty()) {
             LOGGER.fine("Keine Verzeichnis-Regexe konfiguriert, Build wird durchgeführt");
             return true;
@@ -119,6 +126,13 @@ public class GitDirectoryChangeBuildStrategy extends BranchBuildStrategy {
             return true;
         }
 
+        String currSha = getHash(currRevision);
+        String prevSha = getHash(prevRevision);
+        if (currSha == null || prevSha == null) {
+            LOGGER.warning("Commit-Hash konnte nicht ermittelt werden, Build wird durchgeführt");
+            return true;
+        }
+
         String token = getGitHubToken(source);
         if (token == null) {
             LOGGER.warning("Kein GitHub Token verfügbar, Build wird durchgeführt");
@@ -134,32 +148,70 @@ public class GitDirectoryChangeBuildStrategy extends BranchBuildStrategy {
         String repository = source.getRepository();
         GHRepository ghRepo = github.getRepository(repoOwner + "/" + repository);
 
-        String currSha = currRevision.getHead().toString();
-        String prevSha = prevRevision.getHead().toString();
+        return hasChangesInDirectories(ghRepo, prevSha, currSha);
+    }
 
+    /**
+     * Prüft, ob sich zwischen zwei Commits Dateien geändert haben, deren Pfad auf eines der
+     * konfigurierten Verzeichnis-Regexe passt. Von der Verbindungs-/Token-Logik getrennt,
+     * damit dieser Teil isoliert (z.B. mit einem gemockten GHRepository) getestet werden kann.
+     */
+    boolean hasChangesInDirectories(GHRepository ghRepo, String prevSha, String currSha) throws IOException {
         LOGGER.fine("Prüfe Änderungen zwischen " + prevSha + " und " + currSha);
 
-        GHCommit commit = ghRepo.getCommit(currSha);
-        List<GHCommit.File> files = commit.getFiles();
+        GHCompare compare = ghRepo.getCompare(prevSha, currSha);
+        GHCommit.File[] files = compare.getFiles();
+        if (files == null || files.length == 0) {
+            LOGGER.fine("Keine Dateiänderungen zwischen den Revisionen gefunden");
+            return false;
+        }
 
         for (GHCommit.File file : files) {
             String fileName = file.getFileName();
+            if (fileName == null) {
+                continue;
+            }
             LOGGER.finest("Prüfe Datei: " + fileName);
 
-            for (String regex : directoryRegexes) {
-                try {
-                    Pattern pattern = Pattern.compile(regex);
-                    if (pattern.matcher(fileName).matches()) {
-                        LOGGER.fine("Datei " + fileName + " matcht Regex " + regex + ", Build wird durchgeführt");
-                        return true;
-                    }
-                } catch (Exception e) {
-                    LOGGER.log(Level.WARNING, "Fehler beim Auswerten der Regex " + regex, e);
-                }
+            if (matchesAny(fileName, getCompiledPatterns())) {
+                LOGGER.fine("Datei " + fileName + " matcht einen konfigurierten Regex, Build wird durchgeführt");
+                return true;
             }
         }
 
         LOGGER.fine("Keine Änderungen in den konfigurierten Verzeichnissen gefunden");
+        return false;
+    }
+
+    private static String getHash(SCMRevision revision) {
+        if (revision instanceof AbstractGitSCMSource.SCMRevisionImpl) {
+            return ((AbstractGitSCMSource.SCMRevisionImpl) revision).getHash();
+        }
+        return null;
+    }
+
+    private List<Pattern> getCompiledPatterns() {
+        List<Pattern> result = compiledPatterns;
+        if (result == null) {
+            result = new ArrayList<>();
+            for (String regex : directoryRegexes) {
+                try {
+                    result.add(Pattern.compile(regex));
+                } catch (PatternSyntaxException e) {
+                    LOGGER.log(Level.WARNING, "Ungültige Regex übersprungen: " + regex, e);
+                }
+            }
+            compiledPatterns = result;
+        }
+        return result;
+    }
+
+    static boolean matchesAny(String fileName, List<Pattern> patterns) {
+        for (Pattern pattern : patterns) {
+            if (pattern.matcher(fileName).find()) {
+                return true;
+            }
+        }
         return false;
     }
 
@@ -217,7 +269,7 @@ public class GitDirectoryChangeBuildStrategy extends BranchBuildStrategy {
                             StandardCredentials.class,
                             Jenkins.get(),
                             null,
-                            URIRequirementBuilder.fromUri("https://api.github.com").build()
+                            URIRequirementBuilder.create().build()
                     )
             );
             return model;
@@ -226,6 +278,23 @@ public class GitDirectoryChangeBuildStrategy extends BranchBuildStrategy {
         public FormValidation doCheckCredentialsId(@QueryParameter String value) {
             if (value == null || value.isEmpty()) {
                 return FormValidation.ok("Verwendet die Credentials der GitHub-Quelle");
+            }
+            return FormValidation.ok();
+        }
+
+        public FormValidation doCheckDirectoryRegexes(@QueryParameter String value) {
+            if (value == null || value.trim().isEmpty()) {
+                return FormValidation.ok("Ohne Einträge wird immer gebaut");
+            }
+            for (String line : value.split("\\r?\\n")) {
+                if (line.trim().isEmpty()) {
+                    continue;
+                }
+                try {
+                    Pattern.compile(line);
+                } catch (PatternSyntaxException e) {
+                    return FormValidation.error("Ungültige Regex: " + e.getMessage());
+                }
             }
             return FormValidation.ok();
         }

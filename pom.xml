@@ -29,7 +29,7 @@
             <dependency>
                 <groupId>io.jenkins.tools.bom</groupId>
                 <artifactId>bom-2.504.x</artifactId>
-                <version>4862.vc5d4e83b_9cd7</version>
+                <version>4862.vc32a_71c3e731</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -102,6 +102,12 @@
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
             <version>4.13.2</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>5.24.0</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
